@@ -1,7 +1,9 @@
 mod utils;
 
-use parsers::parsers::{parse_rle_string, RleSymbol};
+use bit_vec::BitVec;
+use parsers::parsers::parse_rle_string;
 use wasm_bindgen::prelude::*;
+
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -9,19 +11,19 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-#[wasm_bindgen]
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cell {
-    Dead = 0,
-    Alive = 1,
+extern crate web_sys;
+
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+    };
 }
 
 #[wasm_bindgen]
 pub struct Universe {
     width: u32,
     height: u32,
-    cells: Vec<Cell>,
+    cells: BitVec,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,20 +52,16 @@ impl Shape {
 }
 
 impl Universe {
-    pub fn blank(height: u32, width: u32) -> Universe {
-        Universe {
-            height,
-            width,
-            cells: vec![Cell::Dead; (height * width) as usize],
-        }
+    pub fn get_cells(&self) -> &BitVec {
+        &self.cells
     }
 
-    pub fn set_absolute_pattern(&mut self, cells_alive: Vec<(u32, u32)>) {
+    pub fn set_cells(&mut self, cells_alive: Vec<(u32, u32)>) {
         for (x, y) in cells_alive {
             let x_scaled = x % self.width;
             let y_scaled = y % self.height;
             let idx = self.get_index(x_scaled, y_scaled);
-            self.cells[idx] = Cell::Alive;
+            self.cells.set(idx, true);
         }
     }
 
@@ -82,7 +80,9 @@ impl Universe {
                 let neighbor_row = (row + delta_row) % self.height;
                 let neighbor_col = (column + delta_col) % self.width;
                 let idx = self.get_index(neighbor_row, neighbor_col);
-                count += self.cells[idx] as u8;
+                if self.cells.get(idx).unwrap() {
+                    count += 1;
+                }
             }
         }
         count
@@ -92,33 +92,29 @@ impl Universe {
 /// public methods, exported to JavaScript.
 #[wasm_bindgen]
 impl Universe {
-    pub fn new() -> Universe {
-        let width = 64;
-        let height = 64;
-
-        let cells = (0..width * height)
-            .map(|i| {
-                if i % 2 == 0 || i % 7 == 0 {
-                    Cell::Alive
-                } else {
-                    Cell::Dead
-                }
-            })
-            .collect();
-
+    pub fn new(height: u32, width: u32) -> Universe {
+        utils::set_panic_hook();
         Universe {
-            width,
             height,
-            cells,
+            width,
+            cells: BitVec::from_elem((width * height) as usize, false),
         }
     }
 
-    pub fn blank_pub() -> Universe {
-        Universe::blank(150, 200)
+    pub fn set_width(&mut self, width: u32) {
+        self.width = width;
+        self.cells = BitVec::from_elem((width * self.height) as usize, false);
     }
 
-    pub fn set_rle_shape(&mut self, rle_string: &str) {
-        self.set_absolute_pattern(Shape::from_rle_string(rle_string).alive_cells);
+    pub fn set_height(&mut self, height: u32) {
+        self.height = height;
+        self.cells = BitVec::from_elem((self.width * height) as usize, false);
+    }
+
+    pub fn set_rle_shape(&mut self, rle_string: &str, x: u32, y: u32) {
+        let mut shape = Shape::from_rle_string(rle_string);
+        shape.shift((x, y));
+        self.set_cells(shape.alive_cells);
     }
 
     pub fn tick(&mut self) {
@@ -127,26 +123,35 @@ impl Universe {
         for row in 0..self.height {
             for col in 0..self.width {
                 let idx = self.get_index(row, col);
-                let cell = self.cells[idx];
+                let cell = self.cells.get(idx).unwrap();
                 let live_neighbor_count = self.live_neighbor_count(row, col);
+
+                log!(
+                        "cell[{}, {}] is initially {:?} and has {} live neighbor counts",
+                        row,
+                        col,
+                        cell,
+                        live_neighbor_count,
+                );
 
                 let next_cell = match (cell, live_neighbor_count) {
                     // Rule 1: Any live cell with fewer than two live neighbors
                     // dies, as if caused by underpopulation.
-                    (Cell::Alive, x) if x < 2 => Cell::Dead,
+                    (true, x) if x < 2 => false,
                     // Rule 2: Any live cell with two or three live neighbors
                     // lives on to the next generation.
-                    (Cell::Alive, 2) | (Cell::Alive, 3) => Cell::Alive,
+                    (true, 2) | (true, 3) => true,
                     // Rule 3: Any live cell with more than three live
                     // neighbors dies, as if from overpopulation.
-                    (Cell::Alive, x) if x > 3 => Cell::Dead,
+                    (true, x) if x > 3 => false,
                     // Rule 4: Any dead cell with exactly three live neighbors
                     // becomes a live cell, as if by reproduction.
-                    (Cell::Dead, 3) => Cell::Alive,
+                    (false, 3) => true,
                     // all other cells remain in the same state.
                     (otherwise, _) => otherwise,
                 };
-                next[idx] = next_cell;
+
+                next.set(idx, next_cell);
             }
         }
         self.cells = next;
@@ -161,12 +166,16 @@ use std::fmt;
 
 impl fmt::Display for Universe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for line in self.cells.as_slice().chunks(self.width as usize) {
-            for &cell in line {
-                let symbol = if cell == Cell::Dead { ' ' } else { '◼' };
-                write!(f, "{}", symbol)?;
+        let mut carriage = 0;
+        for cell in self.cells.iter() {
+
+            let symbol = if cell { '◼' } else { ' ' };
+            write!(f, "{}", symbol)?;
+            carriage = carriage + 1;
+            if carriage == self.width - 1 {
+                write!(f, "\n")?;
+                carriage = 0;
             }
-            write!(f, "\n")?;
         }
         Ok(())
     }
@@ -174,24 +183,24 @@ impl fmt::Display for Universe {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Cell, Shape, Universe};
+    use crate::{ Shape, Universe};
 
     #[test]
     fn blank_universe_works() {
-        let u = Universe::blank(4, 4);
-        for c in u.cells {
-            assert_eq!(c, Cell::Dead);
+        let u = Universe::new(4, 4);
+        for c in u.cells.iter() {
+            assert_eq!(c, false);
         }
     }
 
     #[test]
     fn universe_with_absolute_pattern_works() {
-        let mut u = Universe::blank(2, 2);
-        u.set_absolute_pattern(vec![(0, 0), (1, 1)]);
-        assert_eq!(u.cells[0], Cell::Alive);
-        assert_eq!(u.cells[1], Cell::Dead);
-        assert_eq!(u.cells[2], Cell::Dead);
-        assert_eq!(u.cells[3], Cell::Alive);
+        let mut u = Universe::new(2, 2);
+        u.set_cells(vec![(0, 0), (1, 1)]);
+        assert_eq!(u.cells[0], true);
+        assert_eq!(u.cells[1], false);
+        assert_eq!(u.cells[2], false);
+        assert_eq!(u.cells[3], true);
     }
 
     #[test]

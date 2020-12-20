@@ -15,7 +15,7 @@ pub mod parsers {
                     offset.0 += i;
                 }
                 RleSymbol::O(i) => {
-                    for j in (offset.0 .. offset.0 + i) {
+                    for j in offset.0 .. offset.0 + i {
                         alive_cells.push(offset.clone());
                         offset.0 = j + 1;
                     }

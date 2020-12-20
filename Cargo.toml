@@ -13,6 +13,7 @@ default = ["console_error_panic_hook"]
 [dependencies]
 wasm-bindgen = "0.2.63"
 nom = "6.0.1"
+bit-vec = "0.6"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
@@ -36,3 +37,9 @@ opt-level = "s"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Oz", "--enable-mutable-globals"]
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+	"console",
+]

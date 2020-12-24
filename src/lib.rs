@@ -92,33 +92,30 @@ impl Universe {
 /// public methods, exported to JavaScript.
 #[wasm_bindgen]
 impl Universe {
-    pub fn new() -> Universe {
-        let width = 64;
-        let height = 64;
-
-        let cells = (0..width * height)
-            .map(|i| {
-                if i % 2 == 0 || i % 7 == 0 {
-                    Cell::Alive
-                } else {
-                    Cell::Dead
-                }
-            })
-            .collect();
-
+    pub fn new(height: u32, width: u32) -> Universe {
         Universe {
-            width,
             height,
-            cells,
+            width,
+            cells: vec![Cell::Dead; (height * width) as usize],
         }
     }
 
-    pub fn blank_pub() -> Universe {
-        Universe::blank(150, 200)
+    pub fn width(&self) -> u32 {
+        self.width
     }
 
-    pub fn set_rle_shape(&mut self, rle_string: &str) {
-        self.set_absolute_pattern(Shape::from_rle_string(rle_string).alive_cells);
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn cells(&self) -> *const Cell {
+        self.cells.as_ptr()
+    }
+
+    pub fn set_rle_shape(&mut self, rle_string: &str, xoffset: u32, yoffset: u32) {
+        let mut shape = Shape::from_rle_string(rle_string);
+        shape.shift((xoffset, yoffset));
+        self.set_absolute_pattern(shape.alive_cells);
     }
 
     pub fn tick(&mut self) {

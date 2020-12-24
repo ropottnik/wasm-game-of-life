@@ -13,11 +13,11 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 extern crate web_sys;
 
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    };
-}
+// macro_rules! log {
+//     ( $( $t:tt )* ) => {
+//         web_sys::console::log_1(&format!( $( $t )* ).into());
+//     };
+// }
 
 #[wasm_bindgen]
 pub struct Universe {
@@ -125,14 +125,6 @@ impl Universe {
                 let idx = self.get_index(row, col);
                 let cell = self.cells.get(idx).unwrap();
                 let live_neighbor_count = self.live_neighbor_count(row, col);
-
-                log!(
-                        "cell[{}, {}] is initially {:?} and has {} live neighbor counts",
-                        row,
-                        col,
-                        cell,
-                        live_neighbor_count,
-                );
 
                 let next_cell = match (cell, live_neighbor_count) {
                     // Rule 1: Any live cell with fewer than two live neighbors
